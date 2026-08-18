@@ -6,13 +6,42 @@
 
 ```
 comporellian/
-├── README.md          このファイル
-└── comporellon.html   コンポレロン惑星の3D可視化（単体HTML）
+├── README.md            このファイル
+├── comporellon.html     コンポレロン惑星の3D可視化（HTML）
+├── src/
+│   └── geometry.ts      DOM/Three.jsに依存しない純粋な計算ロジック（TypeScript）
+├── test/
+│   └── geometry.test.ts geometry.ts の単体テスト（Vitest）
+├── dist/                tscのビルド出力（gitignore対象。geometry.jsをここに生成）
+├── package.json
+├── tsconfig.json
+└── .nvmrc               想定Nodeバージョン（24.14.0）
 ```
 
 ## comporellon.html について
 
-`comporellon.html` をブラウザで直接開くだけで動作する単体HTMLファイル。Three.js (r128) をCDN (`cdnjs.cloudflare.com`) から読み込むため、閲覧にはインターネット接続が必要。
+Three.js (r128) をCDN (`cdnjs.cloudflare.com`) から読み込んで惑星を描画するページ。閲覧にはインターネット接続が必要。
+
+角度計算などのロジックは `src/geometry.ts` から `dist/geometry.js` としてビルドし、`comporellon.html` は `<script type="module">` でこれをimportしている。そのため **`file://` で直接ダブルクリックして開くことはできず**、ローカルサーバー経由で開く必要がある。
+
+### 実行方法
+
+```bash
+nvm use            # .nvmrc に従い Node v24.14.0 を使用
+npm install
+npm run dev         # geometry.ts をビルドしてから Vite の開発サーバーを起動
+```
+
+表示されたURL（例: `http://localhost:5173/comporellon.html`）をブラウザで開く。
+
+### テスト
+
+```bash
+npm test            # Vitest で src/geometry.ts の単体テストを実行
+npm run typecheck   # 型チェックのみ実行
+```
+
+`test/geometry.test.ts` では、`mulberry32`（疑似乱数生成）、球面座標⇔直交座標の変換（カメラ操作用）、太陽赤緯から北極方向ベクトルを求める計算（季節反映用）を検証している。
 
 ### 再現している設定
 
@@ -38,5 +67,6 @@ comporellian/
 ### 技術メモ
 
 - 惑星表面・雲のテクスチャは `<canvas>` 上で手続き的に生成（外部画像ファイル不使用）
-- 乱数は `mulberry32` による決定論的な疑似乱数生成器を使用し、毎回同じ地形パターンを再現
+- 乱数は `mulberry32` による決定論的な疑似乱数生成器を使用し、毎回同じ地形パターンを再現（`src/geometry.ts` に実装、テスト済み）
 - 明暗境界線・副太陽点・自転軸・両極マーカー・季節を示す弧はワールド座標に固定されたジオメトリとして描画し、惑星本体の自転（`planetPivot`）とは独立させている
+- カメラのドラッグ操作（球面座標⇔直交座標変換）と季節反映（太陽赤緯から北極方向ベクトルを求める計算）も `src/geometry.ts` の純粋関数に切り出し、Three.jsのVector3/Quaternionでラップして利用している
