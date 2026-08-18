@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>観測中のコンポレロン — Three.js</title>
+<style>
+  html,body{margin:0;height:100%;background:#05070d;overflow:hidden;
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;color:#eaf0f7;}
+  #wrap{position:fixed;inset:0;}
+  canvas{display:block;}
+  .label{position:absolute;transform:translate(-50%,-50%);pointer-events:none;
+    font-size:12px;line-height:1.2;white-space:nowrap;
+    padding:2px 7px;border-radius:10px;background:rgba(10,16,28,.72);
+    border:1px solid rgba(140,170,210,.35);box-shadow:0 1px 6px rgba(0,0,0,.4);}
+  .label.red{color:#ff9a9a;border-color:rgba(255,120,120,.6);background:rgba(40,10,12,.7);}
+  .label.sun{color:#ffcf95;border-color:rgba(255,190,120,.6);}
+  .label.pole{color:#9fd0ff;}
+  #panel{position:fixed;left:16px;bottom:16px;max-width:340px;z-index:5;
+    background:rgba(9,14,24,.82);border:1px solid rgba(120,150,190,.28);
+    border-radius:12px;padding:14px 15px;backdrop-filter:blur(6px);}
+  #panel h1{font-size:14px;margin:0 0 6px;letter-spacing:.02em;}
+  #panel p{font-size:11.5px;line-height:1.5;margin:6px 0;color:#c3cede;}
+  #panel .k{color:#ffd9a8;}
+  .row{display:flex;align-items:center;gap:8px;margin-top:10px;}
+  .row label{font-size:11.5px;color:#c3cede;min-width:64px;}
+  input[type=range]{flex:1;accent-color:#ff9a5a;}
+  #decval{font-variant-numeric:tabular-nums;min-width:34px;text-align:right;color:#ffd9a8;font-size:12px;}
+  button{font:inherit;font-size:11.5px;color:#eaf0f7;background:rgba(60,80,110,.5);
+    border:1px solid rgba(140,170,210,.4);border-radius:8px;padding:4px 10px;cursor:pointer;}
+  button:hover{background:rgba(80,105,145,.6);}
+  #hint{position:fixed;right:14px;top:12px;z-index:5;font-size:11px;color:#8ea3bd;
+    background:rgba(9,14,24,.6);border:1px solid rgba(120,150,190,.22);border-radius:8px;padding:5px 9px;}
+</style>
+</head>
+<body>
+<div id="wrap"></div>
+<div id="hint">ドラッグ=回転 ・ ホイール=ズーム</div>
+<div id="panel">
+  <h1>観測中のコンポレロン</h1>
+  <p>『ファウンデーションと地球』でトレヴィズが読み取った惑星を、実際の3D照明で再現。
+  光源が1つなので<span class="k">明暗境界線は自動的に正しく</span>できます。</p>
+  <p>地軸傾斜 <span class="k">21°</span>／太陽赤緯 <span class="k" id="decp">15°</span>（南半球の盛夏寄り）／
+  <span class="k">南極側</span>から観測（時計回り）／やや低温の<span class="k">橙色</span>恒星／氷冠の大きい寒い世界。</p>
+  <p><b>極から明暗境界線までの角距離 = 太陽赤緯 = 季節</b>。スライダーで動かすと一致が確認できます。</p>
+  <div class="row">
+    <label>太陽赤緯</label>
+    <input id="dec" type="range" min="0" max="21" step="0.5" value="15">
+    <span id="decval">15.0°</span>
+  </div>
+  <div class="row">
+    <button id="spin">自転を止める</button>
+    <button id="reset">視点リセット</button>
+  </div>
+</div>
+<div id="err" style="position:fixed;left:12px;top:12px;z-index:20;max-width:70vw;display:none;
+  background:rgba(60,10,12,.92);border:1px solid #ff6a6a;color:#ffd9d9;font-size:12px;
+  padding:8px 12px;border-radius:8px;white-space:pre-wrap;"></div>
+<script>
+window.addEventListener('error',e=>{const d=document.getElementById('err');
+  if(d){d.style.display='block';d.textContent='エラー: '+(e.message||e.error)+'\n'+(e.filename?('@'+e.filename+':'+e.lineno):'');}});
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+if(typeof THREE==='undefined'){const d=document.getElementById('err');d.style.display='block';
+  d.textContent='THREE の読み込みに失敗しました（CDN 未到達）';}
+const R = 1;                 // 惑星半径
+const TILT_MAX = 21;         // 地軸傾斜（度）＝赤緯の最大
+let decDeg = 15;             // 現在の太陽赤緯（度, 南半球夏）
+const wrap = document.getElementById('wrap');
+let W = innerWidth, H = innerHeight;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, W/H, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(W,H); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+wrap.appendChild(renderer.domElement);
+
+// ---- 恒星（やや低温＝橙色の平行光）----
+const sun = new THREE.DirectionalLight(0xffcf9a, 1.9);
+sun.position.set(10,0,0); scene.add(sun); scene.add(sun.target);
+scene.add(new THREE.AmbientLight(0x2a3c54, 0.28));
+
+// ---- 手描き手続きテクスチャ ----
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function makePlanetTexture(){
+  const w=1024,h=512,c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');
+  const rnd=mulberry32(20240817);
+  const og=g.createLinearGradient(0,0,0,h);
+  og.addColorStop(0,'#0b2b4c');og.addColorStop(.5,'#0e3f68');og.addColorStop(1,'#0b2b4c');
+  g.fillStyle=og;g.fillRect(0,0,w,h);
+  const land=['#3f6b3a','#4e7a3f','#6d7a45','#7a6b4a','#586638'];
+  for(let i=0;i<14;i++){
+    const cx=rnd()*w, cy=110+rnd()*(h-220), base=land[rnd()*land.length|0], n=22+(rnd()*30|0);
+    for(let b=0;b<n;b++){
+      const a=rnd()*6.283, r=rnd()*90, x=cx+Math.cos(a)*r, y=cy+Math.sin(a)*r, rad=24+rnd()*54;
+      g.globalAlpha=.5;g.fillStyle=base;g.beginPath();g.arc(x,y,rad,0,6.283);g.fill();
+    }
+  }
+  g.globalAlpha=1;
+  function cap(top){for(let y=0;y<h;y++){const v=y/h;let t=top?(0.30-v)/0.30:(v-0.70)/0.30;
+    if(t<=0)continue;g.globalAlpha=Math.min(1,t*1.15);g.fillStyle='#eef4f9';g.fillRect(0,y,w,1);}}
+  cap(true);cap(false);g.globalAlpha=1;
+  for(let i=0;i<45000;i++){const x=rnd()*w,y=rnd()*h;g.globalAlpha=.05;g.fillStyle=rnd()>.5?'#fff':'#000';g.fillRect(x,y,1,1);}
+  g.globalAlpha=1;
+  const t=new THREE.CanvasTexture(c);t.anisotropy=4;return t;
+}
+function makeCloudTexture(){
+  const w=1024,h=512,c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');
+  const rnd=mulberry32(7);
+  for(let i=0;i<230;i++){
+    const x=rnd()*w,y=rnd()*h,rad=18+rnd()*80,a=.05+rnd()*.28;
+    const gr=g.createRadialGradient(x,y,0,x,y,rad);
+    gr.addColorStop(0,'rgba(255,255,255,'+a+')');gr.addColorStop(1,'rgba(255,255,255,0)');
+    g.fillStyle=gr;g.beginPath();g.arc(x,y,rad,0,6.283);g.fill();
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+// ---- 惑星本体＋雲（自転ピボットにぶら下げる）----
+const planetPivot = new THREE.Group();
+const cloudPivot  = new THREE.Group();
+scene.add(planetPivot, cloudPivot);
+const planet = new THREE.Mesh(new THREE.SphereGeometry(R,72,54),
+  new THREE.MeshStandardMaterial({map:makePlanetTexture(),roughness:1,metalness:0}));
+planetPivot.add(planet);
+const clouds = new THREE.Mesh(new THREE.SphereGeometry(R*1.012,72,54),
+  new THREE.MeshStandardMaterial({map:makeCloudTexture(),transparent:true,depthWrite:false,roughness:1}));
+cloudPivot.add(clouds);
+
+// ---- 世界固定の説明ジオメトリ ----
+// 明暗境界線（太陽方向＝+X に垂直な大円。YZ平面）
+const termPts=[];for(let i=0;i<=128;i++){const a=i/128*6.283;termPts.push(new THREE.Vector3(0,Math.cos(a),Math.sin(a)).multiplyScalar(R*1.004));}
+const term=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(termPts),
+  new THREE.LineBasicMaterial({color:0x6fe0ff}));
+scene.add(term);
+// 副太陽点（常に太陽方向 +X）
+const subsolar=new THREE.Mesh(new THREE.SphereGeometry(R*0.022,16,16),new THREE.MeshBasicMaterial({color:0xffe08a}));
+subsolar.position.set(R,0,0);scene.add(subsolar);
+// 自転軸＋両極マーカー
+const axisLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]),
+  new THREE.LineBasicMaterial({color:0x9fb4cc,transparent:true,opacity:.7}));
+scene.add(axisLine);
+const southDot=new THREE.Mesh(new THREE.SphereGeometry(R*0.03,16,16),new THREE.MeshBasicMaterial({color:0xff6a6a}));
+const northDot=new THREE.Mesh(new THREE.SphereGeometry(R*0.022,16,16),new THREE.MeshBasicMaterial({color:0x88a0bc}));
+scene.add(southDot,northDot);
+// 15°の弧（極→最寄りの境界線点）
+let arc=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:0xff5a5a}));
+scene.add(arc);
+
+// ---- 恒星スプライト ----
+(function(){const s=128,cv=document.createElement('canvas');cv.width=cv.height=s;const g=cv.getContext('2d');
+  const gr=g.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);
+  gr.addColorStop(0,'rgba(255,238,200,1)');gr.addColorStop(.25,'rgba(255,200,130,.95)');
+  gr.addColorStop(.6,'rgba(255,150,70,.35)');gr.addColorStop(1,'rgba(255,150,70,0)');
+  g.fillStyle=gr;g.fillRect(0,0,s,s);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true,depthWrite:false}));
+  sp.scale.set(3,3,1);sp.position.set(9,0,0);scene.add(sp);})();
+
+// ---- 星空 ----
+(function(){const n=1600,pos=new Float32Array(n*3);for(let i=0;i<n;i++){
+  const u=Math.random()*2-1,a=Math.random()*6.283,s=Math.sqrt(1-u*u),r=40+Math.random()*20;
+  pos[i*3]=r*s*Math.cos(a);pos[i*3+1]=r*u;pos[i*3+2]=r*s*Math.sin(a);}
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  scene.add(new THREE.Points(geo,new THREE.PointsMaterial({color:0x9fb4d0,size:.09})));})();
+
+// ---- ラベル（HTMLオーバーレイ）----
+function mkLabel(cls,txt){const d=document.createElement('div');d.className='label '+cls;d.textContent=txt;wrap.appendChild(d);return d;}
+const labels=[
+  {el:mkLabel('sun','恒星（低温・橙色）'), pos:()=>new THREE.Vector3(9,0,0), occl:false},
+  {el:mkLabel('','副太陽点'),               pos:()=>new THREE.Vector3(R,0,0), occl:true},
+  {el:mkLabel('pole','南極（観測側）'),      pos:()=>southDot.position.clone().multiplyScalar(1.14), occl:true},
+  {el:mkLabel('','明暗境界線'),              pos:()=>new THREE.Vector3(0,Math.cos(2.5),Math.sin(2.5)).multiplyScalar(R*1.02), occl:true},
+  {el:mkLabel('red','15°'),                 pos:()=>arc.userData.mid||new THREE.Vector3(), occl:true},
+];
+
+// ---- 季節（赤緯）を反映 ----
+const Y=new THREE.Vector3(0,1,0);
+function updateSeason(deg){
+  decDeg=deg;const d=deg*Math.PI/180;
+  const N=new THREE.Vector3(-Math.sin(d),Math.cos(d),0);          // 北極方向
+  const q=new THREE.Quaternion().setFromUnitVectors(Y,N);
+  planetPivot.quaternion.copy(q);cloudPivot.quaternion.copy(q);
+  const south=N.clone().multiplyScalar(-1);                       // 南極方向（観測側）
+  southDot.position.copy(south).multiplyScalar(R);
+  northDot.position.copy(N).multiplyScalar(R);
+  axisLine.geometry.setFromPoints([N.clone().multiplyScalar(R*1.3),south.clone().multiplyScalar(R*1.3)]);
+  // 15°弧：南極方向 → 最寄りの境界線点(0,-1,0) を deg だけ回転
+  const term=new THREE.Vector3(0,-1,0);
+  const axis=new THREE.Vector3().crossVectors(south,term);
+  const pts=[];const mid=new THREE.Vector3();
+  if(axis.lengthSq()<1e-9){pts.push(south.clone().multiplyScalar(R*1.02));mid.copy(south);}
+  else{axis.normalize();const steps=28;
+    for(let i=0;i<=steps;i++){const t=i/steps;const qi=new THREE.Quaternion().setFromAxisAngle(axis,d*t);
+      const v=south.clone().applyQuaternion(qi).multiplyScalar(R*1.02);pts.push(v);if(i===Math.round(steps/2))mid.copy(v);}}
+  arc.geometry.setFromPoints(pts);arc.userData.mid=mid.clone().multiplyScalar(1.12);
+  document.getElementById('decval').textContent=deg.toFixed(1)+'°';
+  document.getElementById('decp').textContent=deg.toFixed(0)+'°';
+  labels[1].el.textContent='副太陽点 '+deg.toFixed(0)+'°S';
+}
+updateSeason(decDeg);
+
+// ---- 簡易オービット操作 ----
+const target=new THREE.Vector3(0,0,0);
+let rad=4.4, theta, phi;
+function setCam(P){rad=P.length();phi=Math.acos(P.y/rad);theta=Math.atan2(P.z,P.x);apply();}
+function apply(){camera.position.set(target.x+rad*Math.sin(phi)*Math.cos(theta),
+  target.y+rad*Math.cos(phi),target.z+rad*Math.sin(phi)*Math.sin(theta));camera.lookAt(target);}
+const startP=new THREE.Vector3(2.6,-1.6,3.4); setCam(startP);
+let drag=false,px=0,py=0;
+renderer.domElement.addEventListener('pointerdown',e=>{drag=true;px=e.clientX;py=e.clientY;});
+addEventListener('pointerup',()=>drag=false);
+addEventListener('pointermove',e=>{if(!drag)return;theta-=(e.clientX-px)*0.005;phi-=(e.clientY-py)*0.005;
+  phi=Math.max(0.06,Math.min(Math.PI-0.06,phi));px=e.clientX;py=e.clientY;apply();});
+renderer.domElement.addEventListener('wheel',e=>{e.preventDefault();rad*=(1+e.deltaY*0.001);
+  rad=Math.max(2.2,Math.min(12,rad));apply();},{passive:false});
+document.getElementById('reset').onclick=()=>setCam(startP);
+
+// ---- UI ----
+document.getElementById('dec').addEventListener('input',e=>updateSeason(parseFloat(e.target.value)));
+let spinning=true;const spinBtn=document.getElementById('spin');
+spinBtn.onclick=()=>{spinning=!spinning;spinBtn.textContent=spinning?'自転を止める':'自転を回す';};
+
+// ---- ループ ----
+function occluded(P){return P.dot(camera.position) < R*R*0.999 && P.length()<=R*1.05;}
+const v=new THREE.Vector3();
+function frame(){
+  if(spinning){planet.rotation.y+=0.0016;clouds.rotation.y+=0.0022;}   // 南極側から見て時計回り
+  renderer.render(scene,camera);
+  for(const L of labels){v.copy(L.pos());const p=v.clone().project(camera);
+    const on=p.z<1 && !(L.occl&&occluded(v));
+    if(on){L.el.style.display='block';L.el.style.left=((p.x*0.5+0.5)*W)+'px';L.el.style.top=((-p.y*0.5+0.5)*H)+'px';}
+    else L.el.style.display='none';}
+  requestAnimationFrame(frame);
+}
+frame();
+addEventListener('resize',()=>{W=innerWidth;H=innerHeight;camera.aspect=W/H;camera.updateProjectionMatrix();renderer.setSize(W,H);});
+</script>
+</body>
+</html>
