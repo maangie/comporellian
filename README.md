@@ -43,6 +43,10 @@ npm run typecheck   # 型チェックのみ実行
 
 `test/geometry.test.ts` では、`mulberry32`（疑似乱数生成）、球面座標⇔直交座標の変換（カメラ操作用）、太陽赤緯から北極方向ベクトルを求める計算（季節反映用）を検証している。
 
+### GitHub Pagesでの公開
+
+`https://maangie.github.io/comporellian/` で公開している。`main` にpushすると `.github/workflows/pages.yml` が `npm run build` でビルドしてから `index.html`（`comporellon.html` へのリダイレクト）・`comporellon.html`・`dist/` を配信物として自動デプロイする。
+
 ### 再現している設定
 
 - 地軸傾斜 21°、太陽赤緯 15°（南半球の盛夏寄り）
