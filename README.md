@@ -15,7 +15,7 @@ comporellian/
 ├── dist/                tscのビルド出力（gitignore対象。geometry.jsをここに生成）
 ├── package.json
 ├── tsconfig.json
-└── .nvmrc               想定Nodeバージョン（24.14.0）
+└── .nvmrc               想定Nodeバージョン（24.22.1）
 ```
 
 ## comporellon.html について
@@ -27,7 +27,7 @@ Three.js (r128) をCDN (`cdnjs.cloudflare.com`) から読み込んで惑星を�
 ### 実行方法
 
 ```bash
-nvm use            # .nvmrc に従い Node v24.14.0 を使用
+nvm use            # .nvmrc に従い Node v24.22.1 を使用
 npm install
 npm run dev         # geometry.ts をビルドしてから Vite の開発サーバーを起動
 ```
